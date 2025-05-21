@@ -32,7 +32,7 @@ my $bgsend = \&Mail::SpamAssassin::DnsResolver::bgsend;
 	my $conf = $dns_hook_config;
 
 	if ($conf->{spamhaus_dqs_key} ne "") {
-		if ($domain =~ /^(.+)\.(zen|dbl|swl)\.spamhaus\.org$/) {
+		if ($domain =~ /^(.+)\.(dbl|dwl|sbl|sbl-xbl|swl|xbl|zen)\.spamhaus\.org$/) {
 			$domain = join(".", $1, $conf->{spamhaus_dqs_key}, $2, "dq.spamhaus.net");
 		}
 	}
