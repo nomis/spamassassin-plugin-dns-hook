@@ -18,6 +18,7 @@ package Mail::SpamAssassin::Plugin::DnsHook;
 use strict;
 use warnings;
 
+use Mail::SpamAssassin::AsyncLoop;
 use Mail::SpamAssassin::DnsResolver;
 use Mail::SpamAssassin::Logger;
 use Mail::SpamAssassin::Plugin;
@@ -25,20 +26,43 @@ use Mail::SpamAssassin::Plugin;
 our @ISA = qw(Mail::SpamAssassin::Plugin);
 
 my $dns_hook_config = ();
-my $bgsend = \&Mail::SpamAssassin::DnsResolver::bgsend;
 
-*Mail::SpamAssassin::DnsResolver::bgsend = sub {
-	my ($self, $domain, $type, $class, $callback) = @_;
-	my $conf = $dns_hook_config;
+{
+	no warnings "redefine";
 
-	if ($conf->{spamhaus_dqs_key} ne "") {
-		if ($domain =~ /^(.+)\.(dbl|dwl|sbl|sbl-xbl|swl|xbl|zen)\.spamhaus\.org$/) {
-			$domain = join(".", $1, $conf->{spamhaus_dqs_key}, $2, "dq.spamhaus.net");
+	sub rewrite_domain {
+		my ($domain) = @_;
+		my $conf = $dns_hook_config;
+
+		if ($conf->{spamhaus_dqs_key} ne "") {
+			if ($domain =~ /^(.+)\.(dbl|dwl|sbl|sbl-xbl|swl|xbl|zen)\.spamhaus\.org$/) {
+				$domain = join(".", $1, $conf->{spamhaus_dqs_key}, $2, "dq.spamhaus.net");
+			}
 		}
+
+		return $domain;
 	}
 
-	return $bgsend->($self, $domain, $type, $class, $callback);
-};
+	my $bgsend = \&Mail::SpamAssassin::DnsResolver::bgsend;
+
+	*Mail::SpamAssassin::DnsResolver::bgsend = sub {
+		my ($self, $domain, $type, $class, $cb) = @_;
+
+		$domain = rewrite_domain($domain);
+
+		return $bgsend->($self, $domain, $type, $class, $cb);
+	};
+
+	my $bgsend_and_start_lookup = \&Mail::SpamAssassin::AsyncLoop::bgsend_and_start_lookup;
+
+	*Mail::SpamAssassin::AsyncLoop::bgsend_and_start_lookup = sub {
+		my ($self, $domain, $type, $class, $ent, $cb, %options) = @_;
+
+		$domain = rewrite_domain($domain);
+
+		return $bgsend_and_start_lookup->($self, $domain, $type, $class, $ent, $cb, %options);
+	}
+}
 
 sub new {
 	my ($class, $mailsa) = @_;
@@ -69,11 +93,4 @@ sub finish_parsing_end {
 	my ($self, $opts) = @_;
 
 	$dns_hook_config = $opts->{conf};
-}
-
-sub compile_now_start {
-	my ($self) = @_;
-
-	info("dnshook: patching DNS resolver");
-	bless ($self->{mailsa}->{resolver}, "Mail::SpamAssassin::DnsResolver");
 }
